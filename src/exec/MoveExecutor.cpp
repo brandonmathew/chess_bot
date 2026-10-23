@@ -113,8 +113,8 @@ bool MoveExecutor::executeMove(const chess::Move& move, RectI roi, bool orientat
     const int jitterX = static_cast<int>(sqW * 0.15);
     const int jitterY = static_cast<int>(sqH * 0.15);
 
-    auto [fromX, fromY] = detector_.squareScreenCenter(move.from(), roi, orientationWhite);
-    auto [toX, toY] = detector_.squareScreenCenter(move.to(), roi, orientationWhite);
+    auto [fromX, fromY] = detector_.squareScreenCenter(move.from().index(), roi, orientationWhite);
+    auto [toX, toY] = detector_.squareScreenCenter(move.to().index(), roi, orientationWhite);
 
     // Random jitter inside the target square.
     if (jitterX > 0) {
@@ -160,8 +160,8 @@ bool MoveExecutor::executeMove(const chess::Move& move, RectI roi, bool orientat
         if (options.promotionTowardCenter) {
             // The queen occupies the picker cell adjacent to the destination,
             // on the side facing the board centre.
-            const int col = orientationWhite ? (move.to() % 8) : (7 - move.to() % 8);
-            const int row = orientationWhite ? (7 - move.to() / 8) : (move.to() / 8);
+            const int col = orientationWhite ? (move.to().index() % 8) : (7 - move.to().index() % 8);
+            const int row = orientationWhite ? (7 - move.to().index() / 8) : (move.to().index() / 8);
             const int offset = (row < 4) ? static_cast<int>(sqH) : -static_cast<int>(sqH);
             (void)col;
             clickAt(toX, toY + offset);

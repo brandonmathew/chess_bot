@@ -36,7 +36,7 @@ inline void setRect(Image& img, int x, int y, int w, int h, std::uint8_t b, std:
 }
 
 // Plain N x N checkerboard (grayscale squares).
-inline Image checkerboard(int size, int light, std::uint8_t lightValue, std::uint8_t darkValue) {
+inline Image checkerboard(int size, std::uint8_t lightValue, std::uint8_t darkValue) {
     Image img(size, size);
     const int cell = size / 8;
     for (int r = 0; r < 8; ++r) {
@@ -148,7 +148,7 @@ inline void paint(std::array<Image, 64>& squares, int square, std::uint8_t value
 
 inline void pushUci(chess::Board& board, const std::string& uci) {
     const chess::Move move = chess::uci::uciToMove(board, uci);
-    board.makeMove(move, false);
+    board.makeMove(move);
 }
 
 inline Image rotate180(const Image& src) {

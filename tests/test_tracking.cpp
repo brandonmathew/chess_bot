@@ -147,7 +147,7 @@ TEST_CASE("test_tracks_white_then_black_with_overlay_visible") {
     tracker.resetGame();
     tracker.initializeBaseline(detector.sliceBoard(initial, true));
 
-    position.makeMove(chess::uci::uciToMove(position, "e2e4"), false);
+    position.makeMove(chess::uci::uciToMove(position, "e2e4"));
     Image afterWhite = fixtures::renderPosition(position, kWhitePiece, kBlackPiece);
     fixtures::drawOverlay(afterWhite, sq('e', 2), sq('e', 4));
     const auto whiteSquares = detector.sliceBoard(afterWhite, true);
@@ -158,7 +158,7 @@ TEST_CASE("test_tracks_white_then_black_with_overlay_visible") {
     CHECK(uciOf(*whiteMove) == "e2e4");
     CHECK(tracker.board().sideToMove() == chess::Color::BLACK);
 
-    position.makeMove(chess::uci::uciToMove(position, "d7d5"), false);
+    position.makeMove(chess::uci::uciToMove(position, "d7d5"));
     Image afterBlack = fixtures::renderPosition(position, kWhitePiece, kBlackPiece);
     fixtures::drawOverlay(afterBlack, sq('d', 7), sq('d', 5));
     const auto blackSquares = detector.sliceBoard(afterBlack, true);

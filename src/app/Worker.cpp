@@ -469,8 +469,8 @@ void Worker::threadMain(AppConfig settings, OverlayWindow* overlay, int generati
                 std::lock_guard<std::mutex> lock(stateMutex_);
                 orient = tracker_.orientationWhite();
             }
-            const auto from = detector.squareScreenCenter(bestMove.from(), roi, orient);
-            const auto to = detector.squareScreenCenter(bestMove.to(), roi, orient);
+            const auto from = detector.squareScreenCenter(bestMove.from().index(), roi, orient);
+            const auto to = detector.squareScreenCenter(bestMove.to().index(), roi, orient);
             fromX = from.first;
             fromY = from.second;
             toX = to.first;

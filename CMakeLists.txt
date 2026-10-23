@@ -30,7 +30,8 @@ add_library(imgui STATIC
   vendor/imgui/backends/imgui_impl_dx11.cpp
 )
 target_include_directories(imgui PUBLIC vendor/imgui vendor/imgui/backends)
-target_link_libraries(imgui PUBLIC d3d11 dxgi dwmapi imm32 gdi32 user32)
+# d3dcompiler is required: imgui_impl_dx11.cpp calls D3DCompile.
+target_link_libraries(imgui PUBLIC d3d11 d3dcompiler dxgi dwmapi imm32 gdi32 user32)
 
 # ---------------------------------------------------------------------------
 # miniz (zip extraction for the Stockfish downloader)

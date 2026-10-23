@@ -207,9 +207,10 @@ void App::drawLiveStatus() {
     // FEN / UCI sync
     ImGui::TextDisabled("Sync: paste FEN (from Lichess Share->FEN) or type a UCI move");
     ImGui::SetNextItemWidth(-78.0f);
-    if (ImGui::InputText("##sync", syncBuffer_, sizeof(syncBuffer_))) {
-    }
-    const bool enterPressed = ImGui::IsItemDeactivatedAfterEnter();
+    // EnterReturnsTrue makes InputText report exactly the Enter keypress
+    // (the vendored ImGui has no IsItemDeactivatedAfterEnter).
+    const bool enterPressed = ImGui::InputText("##sync", syncBuffer_, sizeof(syncBuffer_),
+                                               ImGuiInputTextFlags_EnterReturnsTrue);
     ImGui::SameLine();
     if (ImGui::Button("Sync", ImVec2(70, 0)) || enterPressed) manualPushMove();
     ImGui::Spacing();
@@ -255,20 +256,29 @@ void App::drawEngineSettings() {
     if (ImGui::CollapsingHeader("Advanced (timing, overlay, fairness)")) {
         ImGui::Text("Engine Move Time: %.2f s", cfg_.engine_move_time);
         ImGui::SetNextItemWidth(-1.0f);
-        if (ImGui::SliderFloat("##movetime", &cfg_.engine_move_time, 0.1f, 3.0f, "%.2f"))
+        float moveTime = static_cast<float>(cfg_.engine_move_time);
+        if (ImGui::SliderFloat("##movetime", &moveTime, 0.1f, 3.0f, "%.2f")) {
+            cfg_.engine_move_time = moveTime;
             worker_.updateSettings(cfg_);
+        }
         if (ImGui::IsItemDeactivatedAfterEdit()) persistSettings();
 
         ImGui::Text("Auto-Play Delay: min %.1f s", cfg_.auto_move_delay_min);
         ImGui::SetNextItemWidth(-1.0f);
-        if (ImGui::SliderFloat("##delaymin", &cfg_.auto_move_delay_min, 0.0f, 3.0f, "%.1f"))
+        float delayMin = static_cast<float>(cfg_.auto_move_delay_min);
+        if (ImGui::SliderFloat("##delaymin", &delayMin, 0.0f, 3.0f, "%.1f")) {
+            cfg_.auto_move_delay_min = delayMin;
             worker_.updateSettings(cfg_);
+        }
         if (ImGui::IsItemDeactivatedAfterEdit()) persistSettings();
 
         ImGui::Text("Auto-Play Delay: max %.1f s", cfg_.auto_move_delay_max);
         ImGui::SetNextItemWidth(-1.0f);
-        if (ImGui::SliderFloat("##delaymax", &cfg_.auto_move_delay_max, 0.0f, 5.0f, "%.1f"))
+        float delayMax = static_cast<float>(cfg_.auto_move_delay_max);
+        if (ImGui::SliderFloat("##delaymax", &delayMax, 0.0f, 5.0f, "%.1f")) {
+            cfg_.auto_move_delay_max = delayMax;
             worker_.updateSettings(cfg_);
+        }
         if (ImGui::IsItemDeactivatedAfterEdit()) persistSettings();
 
         // Overlay arrow appearance (previously dead config keys).
@@ -297,8 +307,11 @@ void App::drawEngineSettings() {
 
         ImGui::Text("Blunder Chance: %.0f %%", cfg_.blunder_chance * 100.0);
         ImGui::SetNextItemWidth(-1.0f);
-        if (ImGui::SliderFloat("##blunder", &cfg_.blunder_chance, 0.0f, 1.0f, "%.2f"))
+        float blunder = static_cast<float>(cfg_.blunder_chance);
+        if (ImGui::SliderFloat("##blunder", &blunder, 0.0f, 1.0f, "%.2f")) {
+            cfg_.blunder_chance = blunder;
             worker_.updateSettings(cfg_);
+        }
         if (ImGui::IsItemDeactivatedAfterEdit()) persistSettings();
 
         if (ImGui::Checkbox("Promotion: click queen slot toward board centre",

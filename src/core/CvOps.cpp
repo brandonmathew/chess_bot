@@ -55,6 +55,76 @@ Hsv bgr2hsv(const Image& img) {
     return out;
 }
 
+Plane canny(const Plane& gray, double lowThreshold, double highThreshold) {
+    Plane out(gray.w, gray.h, 0);
+    if (gray.empty() || gray.w < 3 || gray.h < 3) return out;
+    const int w = gray.w, h = gray.h;
+
+    // Sobel gradients (border-replicated) + L1 magnitude, as OpenCV's
+    // default (L2gradient=false) aperture-3 Canny computes them.
+    std::vector<float> mag(static_cast<std::size_t>(w) * h, 0.0f);
+    std::vector<std::uint8_t> dir(static_cast<std::size_t>(w) * h, 0);  // 0,1,2,3 = 0/45/90/135 deg
+    auto px = [&](int x, int y) {
+        return static_cast<float>(gray.at(std::clamp(x, 0, w - 1), std::clamp(y, 0, h - 1)));
+    };
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            const float gx = (px(x + 1, y - 1) + 2.0f * px(x + 1, y) + px(x + 1, y + 1)) -
+                             (px(x - 1, y - 1) + 2.0f * px(x - 1, y) + px(x - 1, y + 1));
+            const float gy = (px(x - 1, y + 1) + 2.0f * px(x, y + 1) + px(x + 1, y + 1)) -
+                             (px(x - 1, y - 1) + 2.0f * px(x, y - 1) + px(x + 1, y - 1));
+            const std::size_t i = static_cast<std::size_t>(y) * w + x;
+            mag[i] = std::abs(gx) + std::abs(gy);
+            double deg = std::atan2(static_cast<double>(gy), static_cast<double>(gx)) * 180.0 / 3.141592653589793;
+            if (deg < 0.0) deg += 180.0;
+            dir[i] = static_cast<std::uint8_t>(static_cast<int>((deg + 22.5) / 45.0) % 4);
+        }
+    }
+
+    // Non-maximum suppression along the gradient direction, then the
+    // double threshold: 2 = strong edge, 1 = weak (hysteresis candidate).
+    std::vector<std::uint8_t> state(static_cast<std::size_t>(w) * h, 0);
+    static const int kDx[4] = {1, 1, 0, -1};
+    static const int kDy[4] = {0, 1, 1, 1};
+    for (int y = 1; y < h - 1; ++y) {
+        for (int x = 1; x < w - 1; ++x) {
+            const std::size_t i = static_cast<std::size_t>(y) * w + x;
+            const float m = mag[i];
+            if (m <= lowThreshold) continue;
+            const int dx = kDx[dir[i]], dy = kDy[dir[i]];
+            const float n1 = mag[static_cast<std::size_t>(y - dy) * w + (x - dx)];
+            const float n2 = mag[static_cast<std::size_t>(y + dy) * w + (x + dx)];
+            if (m < n1 || m < n2) continue;
+            state[i] = (m > highThreshold) ? 2 : 1;
+        }
+    }
+
+    // Hysteresis: weak pixels connected (8-way) to a strong pixel survive.
+    std::vector<std::size_t> stack;
+    for (std::size_t i = 0; i < state.size(); ++i) {
+        if (state[i] == 2) stack.push_back(i);
+    }
+    while (!stack.empty()) {
+        const std::size_t i = stack.back();
+        stack.pop_back();
+        out.d[i] = 255;
+        const int x = static_cast<int>(i % static_cast<std::size_t>(w));
+        const int y = static_cast<int>(i / static_cast<std::size_t>(w));
+        for (int dy = -1; dy <= 1; ++dy) {
+            for (int dx = -1; dx <= 1; ++dx) {
+                const int xx = x + dx, yy = y + dy;
+                if (xx < 0 || yy < 0 || xx >= w || yy >= h) continue;
+                const std::size_t j = static_cast<std::size_t>(yy) * w + xx;
+                if (state[j] == 1) {
+                    state[j] = 2;
+                    stack.push_back(j);
+                }
+            }
+        }
+    }
+    return out;
+}
+
 Plane inRange(const Hsv& hsv, const int lo[3], const int hi[3]) {
     Plane out(hsv.v.w, hsv.v.h, 0);
     const std::size_t n = out.d.size();

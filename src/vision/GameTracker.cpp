@@ -56,7 +56,7 @@ static std::string uciOf(const chess::Move& move) { return chess::uci::moveToUci
 static void castlingRookSquares(const chess::Move& move, int& rookFrom, int& rookTo) {
     rookFrom = rookTo = -1;
     if (move.typeOf() != chess::Move::CASTLING) return;
-    switch (move.to()) {
+    switch (move.to().index()) {
         case 6: rookFrom = 7; rookTo = 5; break;    // g1: h1 -> f1
         case 2: rookFrom = 0; rookTo = 3; break;    // c1: a1 -> d1
         case 62: rookFrom = 63; rookTo = 61; break;  // g8: h8 -> f8
@@ -243,8 +243,8 @@ std::optional<chess::Move> GameTracker::matchHighlightsToMove(const std::vector<
 
     for (const chess::Move& move : legal) {
         std::array<bool, 64> involved{};
-        involved[static_cast<std::size_t>(move.from())] = true;
-        involved[static_cast<std::size_t>(move.to())] = true;
+        involved[static_cast<std::size_t>(move.from().index())] = true;
+        involved[static_cast<std::size_t>(move.to().index())] = true;
         int rookFrom = -1, rookTo = -1;
         castlingRookSquares(move, rookFrom, rookTo);
         if (rookFrom >= 0) {
@@ -267,7 +267,7 @@ std::optional<chess::Move> GameTracker::matchHighlightsToMove(const std::vector<
     }
 
     // Require both from_sq and to_sq to be highlighted.
-    if (haveBest && hl[static_cast<std::size_t>(bestMove.from())] && hl[static_cast<std::size_t>(bestMove.to())]) {
+    if (haveBest && hl[static_cast<std::size_t>(bestMove.from().index())] && hl[static_cast<std::size_t>(bestMove.to().index())]) {
         return bestMove;
     }
     return std::nullopt;
@@ -305,8 +305,8 @@ std::optional<chess::Move> GameTracker::detectFromOccupancy(
 
     for (const chess::Move& move : legal) {
         int score = 0;
-        if (dep[static_cast<std::size_t>(move.from())]) score += 2;
-        if (arr[static_cast<std::size_t>(move.to())]) score += 2;
+        if (dep[static_cast<std::size_t>(move.from().index())]) score += 2;
+        if (arr[static_cast<std::size_t>(move.to().index())]) score += 2;
 
         int rookFrom = -1, rookTo = -1;
         castlingRookSquares(move, rookFrom, rookTo);
@@ -317,8 +317,8 @@ std::optional<chess::Move> GameTracker::detectFromOccupancy(
 
         // Penalise unexplained changes.
         std::array<bool, 64> involvedDep{}, involvedArr{};
-        involvedDep[static_cast<std::size_t>(move.from())] = true;
-        involvedArr[static_cast<std::size_t>(move.to())] = true;
+        involvedDep[static_cast<std::size_t>(move.from().index())] = true;
+        involvedArr[static_cast<std::size_t>(move.to().index())] = true;
         if (rookFrom >= 0) {
             involvedDep[static_cast<std::size_t>(rookFrom)] = true;
             involvedArr[static_cast<std::size_t>(rookTo)] = true;
@@ -337,8 +337,8 @@ std::optional<chess::Move> GameTracker::detectFromOccupancy(
         }
     }
 
-    if (haveBest && dep[static_cast<std::size_t>(bestMove.from())] &&
-        arr[static_cast<std::size_t>(bestMove.to())] && bestScore >= 3) {
+    if (haveBest && dep[static_cast<std::size_t>(bestMove.from().index())] &&
+        arr[static_cast<std::size_t>(bestMove.to().index())] && bestScore >= 3) {
         return bestMove;
     }
     return std::nullopt;

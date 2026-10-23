@@ -14,6 +14,12 @@ Hsv bgr2hsv(const Image& img);
 // Inclusive per-channel threshold on HSV planes -> 0/255 mask.
 Plane inRange(const Hsv& hsv, const int lo[3], const int hi[3]);
 
+// ── Edges ───────────────────────────────────────────────────────────────────
+// Canny edge detection (cv2.Canny equivalent): Sobel gradients with the
+// default L1 magnitude, non-maximum suppression, double threshold and
+// hysteresis. Returns a 0/255 edge plane.
+Plane canny(const Plane& gray, double lowThreshold, double highThreshold);
+
 // ── Mask arithmetic ─────────────────────────────────────────────────────────
 void bitwiseOrInPlace(Plane& dst, const Plane& src);
 void clearWhere(Plane& dst, const Plane& other);  // dst = 0 wherever other != 0

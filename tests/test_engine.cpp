@@ -68,7 +68,8 @@ TEST_CASE("test_stockfish_engine") {
     CHECK(best != chess::Move{});
     chess::Movelist legal;
     chess::movegen::legalmoves(legal, board);
-    CHECK(legal.contains(best));
+    // chess.hpp 0.9.9's Movelist has no contains(); use the iterators.
+    CHECK(std::find(legal.begin(), legal.end(), best) != legal.end());
 
     engine.stop();
 }
