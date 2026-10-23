@@ -1,0 +1,21 @@
+{
+    "board_roi": [
+        19,
+        145,
+        736,
+        736
+    ],
+    "player_color": "auto",
+    "stockfish_path": "",
+    "engine_depth": 23,
+    "engine_skill_level": 20,
+    "engine_move_time": 0.5,
+    "mode": "auto",
+    "auto_move_delay_min": 0.4,
+    "auto_move_delay_max": 1.2,
+    "humanize_mouse": true,
+    "blunder_chance": 0.0,
+    "show_overlay": true,
+    "overlay_arrow_color": "#00FF66",
+    "overlay_arrow_width": 6
+}

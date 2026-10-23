@@ -1,0 +1,8 @@
+C:/Users/Athena/Desktop/ChessMonger/build/CMakeFiles/imgui.dir
+C:/Users/Athena/Desktop/ChessMonger/build/CMakeFiles/miniz.dir
+C:/Users/Athena/Desktop/ChessMonger/build/CMakeFiles/cm_core.dir
+C:/Users/Athena/Desktop/ChessMonger/build/CMakeFiles/chessmonger.dir
+C:/Users/Athena/Desktop/ChessMonger/build/CMakeFiles/chessmonger_tests.dir
+C:/Users/Athena/Desktop/ChessMonger/build/CMakeFiles/test.dir
+C:/Users/Athena/Desktop/ChessMonger/build/CMakeFiles/edit_cache.dir
+C:/Users/Athena/Desktop/ChessMonger/build/CMakeFiles/rebuild_cache.dir
