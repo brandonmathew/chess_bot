@@ -4,7 +4,7 @@
 
 #include <algorithm>
 #include <cmath>
-#include <vector>
+#include <cstring>
 
 #include "core/Log.h"
 
@@ -28,159 +28,185 @@ bool OverlayWindow::create() {
         wc.hInstance = instance;
         wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
         wc.lpszClassName = kClassName;
-        if (!RegisterClassExA(&wc)) {
-            if (GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
-                log::print("[Overlay] RegisterClassEx failed (%lu)", GetLastError());
-                return false;
-            }
+        if (!RegisterClassExA(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
+            log::print("[Overlay] RegisterClassEx failed (%lu)", GetLastError());
+            return false;
         }
         g_classRegistered = true;
     }
 
-    hwnd_ = CreateWindowExA(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW |
-                                WS_EX_NOACTIVATE,
-                            kClassName, "ChessMonger Overlay", WS_POPUP, 0, 0, 100, 100, nullptr, nullptr,
-                            instance, this);
+    // The window spans the whole virtual desktop from the start; content is
+    // composited with UpdateLayeredWindow (per-pixel alpha), never WM_PAINT.
+    const int vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
+    const int vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    const int vw = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+    const int vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+
+    hwnd_ = CreateWindowExA(WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_NOACTIVATE,
+                            kClassName, "ChessMonger Overlay", WS_POPUP, vx, vy, std::max(1, vw),
+                            std::max(1, vh), nullptr, nullptr, instance, nullptr);
     if (!hwnd_) {
         log::print("[Overlay] CreateWindowEx failed (%lu)", GetLastError());
         return false;
     }
-
-    // Same mechanism as tkinter's -transparentcolor #abcdef: everything drawn
-    // in the key colour is invisible, everything else is opaque.
-    SetLayeredWindowAttributes(hwnd_, kTransparencyKey, 0, LWA_COLORKEY);
     return true;
 }
 
 void OverlayWindow::destroy() {
+    shown_ = false;
     if (hwnd_) {
         DestroyWindow(hwnd_);
         hwnd_ = nullptr;
     }
+    if (memDc_) {
+        if (oldBitmap_) SelectObject(memDc_, oldBitmap_);
+        oldBitmap_ = nullptr;
+        if (dib_) {
+            DeleteObject(dib_);
+            dib_ = nullptr;
+        }
+        DeleteDC(memDc_);
+        memDc_ = nullptr;
+    }
+    pixels_ = nullptr;
+    w_ = h_ = 0;
+}
+
+bool OverlayWindow::ensureSurface() {
+    const int vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
+    const int vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+    const int vw = std::max(1, GetSystemMetrics(SM_CXVIRTUALSCREEN));
+    const int vh = std::max(1, GetSystemMetrics(SM_CYVIRTUALSCREEN));
+    if (dib_ && vx == originX_ && vy == originY_ && vw == w_ && vh == h_) return true;
+
+    if (memDc_) {
+        if (oldBitmap_) SelectObject(memDc_, oldBitmap_);
+        oldBitmap_ = nullptr;
+        if (dib_) {
+            DeleteObject(dib_);
+            dib_ = nullptr;
+        }
+        DeleteDC(memDc_);
+        memDc_ = nullptr;
+    }
+    pixels_ = nullptr;
+
+    memDc_ = CreateCompatibleDC(nullptr);
+    if (!memDc_) return false;
+
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = vw;
+    bmi.bmiHeader.biHeight = -vh;  // top-down: memory row 0 is the top row
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    dib_ = CreateDIBSection(memDc_, &bmi, DIB_RGB_COLORS, &pixels_, nullptr, 0);
+    if (!dib_ || !pixels_) {
+        log::print("[Overlay] CreateDIBSection failed (%lu)", GetLastError());
+        DeleteDC(memDc_);
+        memDc_ = nullptr;
+        dib_ = nullptr;
+        return false;
+    }
+    oldBitmap_ = SelectObject(memDc_, dib_);
+    originX_ = vx;
+    originY_ = vy;
+    w_ = vw;
+    h_ = vh;
+    return true;
 }
 
 void OverlayWindow::show(RectI bounds) {
     if (!hwnd_) return;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        state_.originX = bounds.x;
-        state_.originY = bounds.y;
         state_.roiW = std::max(1, bounds.w);
+        shown_ = true;
+        if (!ensureSurface()) {
+            shown_ = false;
+            return;
+        }
+        // Position in the topmost band over the whole desktop, then paint.
+        SetWindowPos(hwnd_, HWND_TOPMOST, originX_, originY_, w_, h_,
+                     SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        renderLocked();
     }
-    SetWindowPos(hwnd_, HWND_TOPMOST, bounds.x, bounds.y, std::max(1, bounds.w), std::max(1, bounds.h),
-                 SWP_NOACTIVATE | SWP_SHOWWINDOW);
-    RedrawWindow(hwnd_, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW);
+    log::print("[Overlay] Desktop overlay shown (window %d,%d %dx%d; board ROI %d,%d %dx%d)", originX_,
+               originY_, w_, h_, bounds.x, bounds.y, bounds.w, bounds.h);
 }
 
 void OverlayWindow::hide() {
+    shown_ = false;
     if (hwnd_) ShowWindow(hwnd_, SW_HIDE);
-}
-
-bool OverlayWindow::visible() const {
-    return hwnd_ && IsWindowVisible(hwnd_);
 }
 
 void OverlayWindow::setArrow(int fromX, int fromY, int toX, int toY, int rgb, int width,
                              const std::string& evalText) {
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        state_.hasArrow = true;
-        state_.fromX = fromX;
-        state_.fromY = fromY;
-        state_.toX = toX;
-        state_.toY = toY;
-        state_.rgb = rgb;
-        state_.width = std::clamp(width, 2, 24);
-        state_.evalText = evalText;
-    }
-    if (hwnd_) {
-        // Thread-safe: paint is dispatched on the owning (main) thread.
-        InvalidateRect(hwnd_, nullptr, TRUE);
+    std::lock_guard<std::mutex> lock(mutex_);
+    state_.hasArrow = true;
+    state_.fromX = fromX;
+    state_.fromY = fromY;
+    state_.toX = toX;
+    state_.toY = toY;
+    state_.rgb = rgb;
+    state_.width = std::clamp(width, 2, 24);
+    state_.evalText = evalText;
+    if (shown_ && hwnd_) {
+        // Re-assert topmost on every suggestion: apps that grabbed the
+        // topmost band after us must not bury the overlay.
+        SetWindowPos(hwnd_, HWND_TOPMOST, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        renderLocked();
     }
 }
 
 void OverlayWindow::clearArrow() {
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        state_.hasArrow = false;
-        state_.evalText.clear();
-    }
-    if (hwnd_) InvalidateRect(hwnd_, nullptr, TRUE);
+    std::lock_guard<std::mutex> lock(mutex_);
+    state_.hasArrow = false;
+    state_.evalText.clear();
+    if (shown_ && hwnd_) renderLocked();
 }
 
-LRESULT CALLBACK OverlayWindow::wndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    if (msg == WM_NCCREATE) {
-        auto* cs = reinterpret_cast<CREATESTRUCTA*>(lParam);
-        SetWindowLongPtrA(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(cs->lpCreateParams));
-        return DefWindowProcA(hwnd, msg, wParam, lParam);
-    }
+void OverlayWindow::renderLocked() {
+    if (!hwnd_ || !shown_ || !ensureSurface()) return;
 
-    auto* self = reinterpret_cast<OverlayWindow*>(GetWindowLongPtrA(hwnd, GWLP_USERDATA));
-    switch (msg) {
-        case WM_PAINT:
-            if (self) return self->handlePaint(hwnd);
-            break;
-        case WM_ERASEBKGND:
-            return 1;
-        case WM_DESTROY:
-            return 0;
-        default:
-            break;
-    }
-    return DefWindowProcA(hwnd, msg, wParam, lParam);
-}
+    // Fully transparent base (BGRA all-zero).
+    std::memset(pixels_, 0, static_cast<std::size_t>(w_) * static_cast<std::size_t>(h_) * 4);
 
-LRESULT OverlayWindow::handlePaint(HWND hwnd) {
-    PAINTSTRUCT ps;
-    HDC dc = BeginPaint(hwnd, &ps);
+    const State& s = state_;
+    if (s.hasArrow) {
+        const COLORREF color = RGB(s.rgb & 0xFF, (s.rgb >> 8) & 0xFF, (s.rgb >> 16) & 0xFF);
 
-    RECT client{};
-    GetClientRect(hwnd, &client);
-    const int width = client.right - client.left;
-    const int height = client.bottom - client.top;
+        // Screen -> overlay coordinates (window origin is the desktop origin).
+        const int x1 = s.fromX - originX_;
+        const int y1 = s.fromY - originY_;
+        const int x2 = s.toX - originX_;
+        const int y2 = s.toY - originY_;
 
-    // Fill everything with the transparency key colour first.
-    HBRUSH keyBrush = CreateSolidBrush(kTransparencyKey);
-    FillRect(dc, &client, keyBrush);
-    DeleteObject(keyBrush);
-
-    State snapshot;
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        snapshot = state_;
-    }
-
-    if (snapshot.hasArrow && width > 0 && height > 0) {
-        const COLORREF color = RGB(snapshot.rgb & 0xFF, (snapshot.rgb >> 8) & 0xFF, (snapshot.rgb >> 16) & 0xFF);
-
-        // Screen -> overlay-window coordinates (the window covers the ROI).
-        const int x1 = snapshot.fromX - snapshot.originX;
-        const int y1 = snapshot.fromY - snapshot.originY;
-        const int x2 = snapshot.toX - snapshot.originX;
-        const int y2 = snapshot.toY - snapshot.originY;
-
-        const int sqW = std::max(1, snapshot.roiW) / 8;
+        const int sqW = std::max(1, s.roiW) / 8;
         const int radius = static_cast<int>(sqW * 0.35);
 
-        HGDIOBJ oldBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
+        HGDIOBJ oldBrush = SelectObject(memDc_, GetStockObject(NULL_BRUSH));
 
-        // Source square: outline circle (tkinter create_oval outline only).
+        // Source square: outline circle.
         HPEN sourcePen = CreatePen(PS_SOLID, 3, color);
-        HGDIOBJ oldPen = SelectObject(dc, sourcePen);
-        Ellipse(dc, x1 - radius, y1 - radius, x1 + radius, y1 + radius);
+        HGDIOBJ oldPen = SelectObject(memDc_, sourcePen);
+        Ellipse(memDc_, x1 - radius, y1 - radius, x1 + radius, y1 + radius);
 
         // Destination square: light fill + outline.
         HBRUSH destBrush = CreateSolidBrush(RGB((GetRValue(color) + 255) / 2, (GetGValue(color) + 255) / 2,
                                                 (GetBValue(color) + 255) / 2));
         HPEN destPen = CreatePen(PS_SOLID, 2, color);
-        SelectObject(dc, destPen);
-        HGDIOBJ prevDestBrush = SelectObject(dc, destBrush);
-        Ellipse(dc, x2 - radius, y2 - radius, x2 + radius, y2 + radius);
-        SelectObject(dc, prevDestBrush);
+        SelectObject(memDc_, destPen);
+        HGDIOBJ prevDestBrush = SelectObject(memDc_, destBrush);
+        Ellipse(memDc_, x2 - radius, y2 - radius, x2 + radius, y2 + radius);
+        SelectObject(memDc_, prevDestBrush);
 
-        // Arrow shaft (tkinter arrowshape = (16, 20, 8): 16px long, 20px wide).
-        HPEN arrowPen = CreatePen(PS_SOLID | PS_ENDCAP_ROUND, snapshot.width, color);
-        SelectObject(dc, arrowPen);
+        // Arrow shaft + head.
+        HPEN arrowPen = CreatePen(PS_SOLID | PS_ENDCAP_ROUND, s.width, color);
+        SelectObject(memDc_, arrowPen);
 
         const double dx = static_cast<double>(x2 - x1);
         const double dy = static_cast<double>(y2 - y1);
@@ -189,16 +215,14 @@ LRESULT OverlayWindow::handlePaint(HWND hwnd) {
             const double ux = dx / len, uy = dy / len;
             const double headLen = 16.0;
             const double halfW = 10.0;
-            // Shaft stops where the arrow head begins.
             const double tipX = x2 - ux * (radius * 0.6);
             const double tipY = y2 - uy * (radius * 0.6);
             const double baseX = tipX - ux * headLen;
             const double baseY = tipY - uy * headLen;
 
-            MoveToEx(dc, static_cast<int>(std::lround(x1)), static_cast<int>(std::lround(y1)), nullptr);
-            LineTo(dc, static_cast<int>(std::lround(baseX)), static_cast<int>(std::lround(baseY)));
+            MoveToEx(memDc_, static_cast<int>(std::lround(x1)), static_cast<int>(std::lround(y1)), nullptr);
+            LineTo(memDc_, static_cast<int>(std::lround(baseX)), static_cast<int>(std::lround(baseY)));
 
-            // Arrow head triangle.
             const double px = -uy, py = ux;  // perpendicular
             POINT head[3] = {
                 {static_cast<LONG>(std::lround(tipX)), static_cast<LONG>(std::lround(tipY))},
@@ -206,52 +230,72 @@ LRESULT OverlayWindow::handlePaint(HWND hwnd) {
                 {static_cast<LONG>(std::lround(baseX - px * halfW)), static_cast<LONG>(std::lround(baseY - py * halfW))},
             };
             HBRUSH headBrush = CreateSolidBrush(color);
-            HGDIOBJ prevHeadBrush = SelectObject(dc, headBrush);
-            Polygon(dc, head, 3);
-            SelectObject(dc, prevHeadBrush);
+            HGDIOBJ prevHeadBrush = SelectObject(memDc_, headBrush);
+            Polygon(memDc_, head, 3);
+            SelectObject(memDc_, prevHeadBrush);
             DeleteObject(headBrush);
         }
 
-        // Evaluation badge (mirrors the tkinter rectangle + text).
-        if (!snapshot.evalText.empty()) {
-            const int badgeX = std::clamp(x2, 40, std::max(40, width - 40));
-            const int badgeY = std::clamp(y2 - static_cast<int>(sqW * 0.45), 20, std::max(20, height - 20));
+        // Evaluation badge.
+        if (!s.evalText.empty()) {
+            const int badgeX = std::clamp(x2, 40, std::max(40, w_ - 40));
+            const int badgeY = std::clamp(y2 - static_cast<int>(sqW * 0.45), 20, std::max(20, h_ - 20));
             RECT badge{badgeX - 30, badgeY - 12, badgeX + 30, badgeY + 12};
             HBRUSH badgeBrush = CreateSolidBrush(RGB(0x1E, 0x1E, 0x1E));
-            FillRect(dc, &badge, badgeBrush);
-            HPEN badgePen = CreatePen(PS_SOLID, 2, color);
-            HGDIOBJ prevBadgePen = SelectObject(dc, badgePen);
-            HGDIOBJ prevBadgeBrush = SelectObject(dc, GetStockObject(NULL_BRUSH));
-            Rectangle(dc, badge.left, badge.top, badge.right, badge.bottom);
-            SelectObject(dc, prevBadgeBrush);
-            SelectObject(dc, prevBadgePen);
-            DeleteObject(badgePen);
+            FillRect(memDc_, &badge, badgeBrush);
             DeleteObject(badgeBrush);
+            HPEN badgePen = CreatePen(PS_SOLID, 2, color);
+            HGDIOBJ prevBadgePen = SelectObject(memDc_, badgePen);
+            HGDIOBJ prevBadgeBrush = SelectObject(memDc_, GetStockObject(NULL_BRUSH));
+            Rectangle(memDc_, badge.left, badge.top, badge.right, badge.bottom);
+            SelectObject(memDc_, prevBadgeBrush);
+            SelectObject(memDc_, prevBadgePen);
+            DeleteObject(badgePen);
 
-            SetBkMode(dc, TRANSPARENT);
-            SetTextColor(dc, RGB(255, 255, 255));
+            SetBkMode(memDc_, TRANSPARENT);
+            SetTextColor(memDc_, RGB(255, 255, 255));
             HFONT font = CreateFontA(14, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
                                      OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
                                      DEFAULT_PITCH | FF_SWISS, "Helvetica");
-            HGDIOBJ oldFont = SelectObject(dc, font);
-            SetTextAlign(dc, TA_CENTER | TA_BASELINE);
-            TextOutA(dc, badgeX, badgeY, snapshot.evalText.c_str(),
-                     static_cast<int>(snapshot.evalText.size()));
-            SetTextAlign(dc, TA_LEFT | TA_TOP);
-            SelectObject(dc, oldFont);
+            HGDIOBJ oldFont = SelectObject(memDc_, font);
+            SetTextAlign(memDc_, TA_CENTER | TA_BASELINE);
+            TextOutA(memDc_, badgeX, badgeY, s.evalText.c_str(), static_cast<int>(s.evalText.size()));
+            SetTextAlign(memDc_, TA_LEFT | TA_TOP);
+            SelectObject(memDc_, oldFont);
             DeleteObject(font);
         }
 
-        SelectObject(dc, oldPen);
-        SelectObject(dc, oldBrush);
+        SelectObject(memDc_, oldPen);
+        SelectObject(memDc_, oldBrush);
         DeleteObject(sourcePen);
         DeleteObject(destPen);
         DeleteObject(destBrush);
         DeleteObject(arrowPen);
+
+        // GDI writes RGB but leaves the DIB alpha byte at 0. Everything that
+        // was drawn becomes fully opaque; untouched pixels stay transparent.
+        auto* px = static_cast<std::uint8_t*>(pixels_);
+        const std::size_t count = static_cast<std::size_t>(w_) * static_cast<std::size_t>(h_);
+        for (std::size_t i = 0; i < count; ++i) {
+            std::uint8_t* p = px + i * 4;
+            if (p[0] | p[1] | p[2]) p[3] = 255;
+        }
+        GdiFlush();
     }
 
-    EndPaint(hwnd, &ps);
-    return 0;
+    POINT dst{originX_, originY_};
+    SIZE size{w_, h_};
+    POINT src{0, 0};
+    BLENDFUNCTION blend{AC_SRC_OVER, 0, 255, AC_SRC_ALPHA};
+    UpdateLayeredWindow(hwnd_, nullptr, &dst, &size, memDc_, &src, 0, &blend, ULW_ALPHA);
+}
+
+LRESULT CALLBACK OverlayWindow::wndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    // No WM_PAINT handling: content is composited by UpdateLayeredWindow.
+    // WS_EX_TRANSPARENT + WS_EX_NOACTIVATE keep input flowing to the app
+    // underneath; anything else goes to the default handler.
+    if (msg == WM_DESTROY) return 0;
+    return DefWindowProcA(hwnd, msg, wParam, lParam);
 }
 
 }  // namespace cm

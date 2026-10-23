@@ -8,10 +8,17 @@
 
 namespace cm {
 
-// Transparent, click-through suggestion overlay (the tkinter Canvas equivalent).
-// Created on the main thread; the tracker thread updates it through
-// setSuggestion() + InvalidateRect(), and the main loop's message dispatch
-// performs the actual painting.
+// True desktop overlay for the move suggestion (Discord/NVIDIA-style): a
+// borderless popup that spans the ENTIRE virtual desktop, sits in the
+// topmost band above other applications, is click-through and never takes
+// focus, and is composited with per-pixel alpha via UpdateLayeredWindow.
+//
+// The previous design (a window sized to the board ROI, colour-key
+// transparency, WM_PAINT rendering) could end up composited with the main
+// window instead of floating over the desktop. This design removes the
+// whole class of problems: the window covers the desktop 1:1, arrow
+// coordinates are plain screen coordinates, and every update re-asserts
+// HWND_TOPMOST and re-composites immediately - no paint-message dependency.
 class OverlayWindow {
    public:
     OverlayWindow() = default;
@@ -20,41 +27,52 @@ class OverlayWindow {
     OverlayWindow(const OverlayWindow&) = delete;
     OverlayWindow& operator=(const OverlayWindow&) = delete;
 
-    // Create the (hidden) layered window. Returns false on failure.
+    // Create the (hidden) overlay window. Returns false on failure.
     bool create();
     void destroy();
 
-    // Position/size in virtual-desktop coordinates; passes through to ShowWindow.
+    // Show the overlay. `bounds` is the board ROI in screen coordinates;
+    // it only feeds the badge geometry - the window itself always spans
+    // the full virtual desktop.
     void show(RectI bounds);
     void hide();
-    bool visible() const;
+    bool visible() const { return shown_; }
 
-    // Arrow drawing parameters (thread-safe).
+    // Arrow drawing parameters in screen coordinates (thread-safe).
     void setArrow(int fromX, int fromY, int toX, int toY, int rgb, int width, const std::string& evalText);
     void clearArrow();
 
-    // ROI changes invalidate nothing by themselves; arrow colour/width are
-    // copied per call, so the tracker simply re-posts its suggestion.
-
    private:
     static LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
-    LRESULT handlePaint(HWND hwnd);
+
+    // (Re)build the back buffer at the current virtual-desktop size.
+    bool ensureSurface();
+    // Draw the current state into the back buffer and composite it.
+    // Caller must hold mutex_. No-op when the window is hidden.
+    void renderLocked();
 
     struct State {
         bool hasArrow = false;
         int fromX = 0, fromY = 0, toX = 0, toY = 0;  // screen coordinates
-        int originX = 0, originY = 0;                // overlay window origin (ROI)
-        int roiW = 512;                              // overlay/ROI width
+        int roiW = 512;                              // board ROI width (badge geometry)
         int rgb = 0x0066FF00;  // encoded as r | g<<8 | b<<16 (== #00FF66)
         int width = 6;
         std::string evalText;
     };
 
     HWND hwnd_ = nullptr;
+    bool shown_ = false;
+
+    // Back buffer: 32bpp top-down DIB covering the virtual desktop.
+    HDC memDc_ = nullptr;
+    HBITMAP dib_ = nullptr;
+    HGDIOBJ oldBitmap_ = nullptr;
+    void* pixels_ = nullptr;  // BGRA, row-major, w_ * h_ * 4
+    int originX_ = 0, originY_ = 0;  // virtual-desktop origin (SM_X/YVIRTUALSCREEN)
+    int w_ = 0, h_ = 0;
+
     mutable std::mutex mutex_;
     State state_;
-
-    static constexpr COLORREF kTransparencyKey = RGB(0xAB, 0xCD, 0xEF);
 };
 
 }  // namespace cm
