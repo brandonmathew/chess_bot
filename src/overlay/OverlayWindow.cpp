@@ -49,6 +49,16 @@ bool OverlayWindow::create() {
         log::print("[Overlay] CreateWindowEx failed (%lu)", GetLastError());
         return false;
     }
+
+    // Exclude the overlay from screenshots, recordings and screen shares:
+    // it stays visible on the physical display but is absent from every
+    // capture (which also keeps the suggestion arrow out of the bot's own
+    // board captures). Requires Windows 10 2004+; log and continue if the
+    // OS refuses.
+    if (!SetWindowDisplayAffinity(hwnd_, WDA_EXCLUDEFROMCAPTURE)) {
+        log::print("[Overlay] SetWindowDisplayAffinity failed (%lu) - overlay will appear in captures",
+                   GetLastError());
+    }
     return true;
 }
 
