@@ -99,6 +99,14 @@ bool App::init() {
     if (cfg_.hasRoi()) boardStatus_ = "Board Region: " + formatRoi(cfg_.board_roi);
 
     log::print("ChessMonger ready. Config: %s", configSummary().c_str());
+
+    // Overlay-only launch: with a saved board region there is nothing to
+    // ask the user - start tracking immediately and let the desktop
+    // overlay be the only thing on screen.
+    if (cfg_.hasRoi()) {
+        startTracking();
+        log::print("[App] Overlay-only mode: settings window hidden (tray icon or Ctrl+Alt+G opens it).");
+    }
     return true;
 }
 
@@ -247,7 +255,7 @@ void App::drawEngineSettings() {
         worker_.updateSettings(cfg_);
         persistSettings();
     }
-    if (ImGui::Checkbox("Show Overlay Hint (visual mode)", &cfg_.show_overlay)) {
+    if (ImGui::Checkbox("Show Overlay Hint", &cfg_.show_overlay)) {
         worker_.updateSettings(cfg_);
         persistSettings();
         applyOverlayVisibility();
@@ -553,8 +561,9 @@ void App::onModeChanged(const std::string& mode) {
 }
 
 void App::applyOverlayVisibility() {
-    const bool shouldShow =
-        worker_.running() && cfg_.mode == "visual" && cfg_.show_overlay && cfg_.hasRoi();
+    // The overlay is the product's face in both modes now: in auto mode the
+    // arrow shows the move that is about to be played.
+    const bool shouldShow = worker_.running() && cfg_.show_overlay && cfg_.hasRoi();
     if (shouldShow) {
         overlay_.clearArrow();
         overlay_.show(cfg_.roiRect());

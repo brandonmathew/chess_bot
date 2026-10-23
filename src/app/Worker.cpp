@@ -456,8 +456,9 @@ void Worker::threadMain(AppConfig settings, OverlayWindow* overlay, int generati
 
         analyzedFen = fen;
 
-        // ── Overlay suggestion (visual mode) ─────────────────────────────────
-        if (cfg.mode == "visual" && cfg.show_overlay && overlay) {
+        // ── Overlay suggestion (both modes: in auto it previews the move
+        //    that is about to be clicked) ────────────────────────────────────
+        if (cfg.show_overlay && overlay) {
             int rgb = 0x0066FF00;  // r | g<<8 | b<<16 for #00FF66
             int r = 0, g = 0, b = 0;
             if (parseHexColor(cfg.overlay_arrow_color, r, g, b)) rgb = r | (g << 8) | (b << 16);

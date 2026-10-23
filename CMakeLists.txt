@@ -69,7 +69,8 @@ target_compile_options(cm_core PRIVATE ${CM_WARNINGS})
 # ---------------------------------------------------------------------------
 # Application
 # ---------------------------------------------------------------------------
-add_executable(chessmonger
+# WIN32: GUI subsystem - no console window; WinMain is the entry point.
+add_executable(chessmonger WIN32
   src/main.cpp
   src/app/App.cpp
   src/app/Worker.cpp

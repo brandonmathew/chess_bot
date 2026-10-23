@@ -21,6 +21,10 @@ class App {
 
     std::string configSummary() const;
 
+    // Overlay-only mode: the settings window stays hidden unless the board
+    // has never been calibrated (main() asks this after init()).
+    bool needsSettings() const { return !cfg_.hasRoi(); }
+
     // Builds one ImGui frame (called from the render loop).
     void frame();
 
