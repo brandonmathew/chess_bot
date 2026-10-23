@@ -178,6 +178,14 @@ int runApp(HINSTANCE instance) {
         SetWindowRgn(window, region, TRUE);
     }
 
+    // Same capture exclusion as the suggestion overlay: the menu panel is
+    // visible on the physical display but absent from screenshots,
+    // recordings and screen shares (Windows 10 2004+; log if refused).
+    if (!SetWindowDisplayAffinity(window, WDA_EXCLUDEFROMCAPTURE)) {
+        cm::log::print("[App] SetWindowDisplayAffinity failed (%lu) - menu will appear in captures",
+                       GetLastError());
+    }
+
     if (!createDeviceD3D(window)) {
         cleanupDeviceD3D();
         UnregisterClassA(wc.lpszClassName, wc.hInstance);
