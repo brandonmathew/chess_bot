@@ -7,7 +7,8 @@
 // WS_POPUP clipped to a rounded rectangle, and the ImGui menu fills it
 // edge to edge. Drag the panel by its header strip; quit with the X in
 // the header or File > Quit. Tracking auto-starts from the saved
-// config on launch.
+// config on launch. The Insert key toggles the menu panel show/hide
+// from anywhere (the arrow overlay is unaffected).
 #include <windows.h>
 #include <d3d11.h>
 
@@ -30,6 +31,20 @@ bool g_occluded = false;
 
 constexpr int kPanelWidth = 680;
 constexpr int kPanelHeight = 880;
+
+bool g_panelVisible = true;
+constexpr int kInsertHotkeyId = 78;  // Insert toggles the menu panel
+
+void togglePanel(HWND window) {
+    g_panelVisible = !g_panelVisible;
+    if (g_panelVisible) {
+        ShowWindow(window, SW_SHOW);
+        SetForegroundWindow(window);
+        g_occluded = false;
+    } else {
+        ShowWindow(window, SW_HIDE);
+    }
+}
 
 void createRenderTarget() {
     ID3D11Texture2D* backBuffer = nullptr;
@@ -124,6 +139,9 @@ LRESULT WINAPI wndProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) 
                 createRenderTarget();
             }
             return 0;
+        case WM_HOTKEY:
+            if (static_cast<int>(wParam) == kInsertHotkeyId) togglePanel(window);
+            return 0;
         case WM_CLOSE:
             DestroyWindow(window);
             return 0;
@@ -182,6 +200,10 @@ int runApp(HINSTANCE instance) {
     app.setHostWindow(window);
     app.init();  // auto-starts tracking when a board region is configured
 
+    if (!RegisterHotKey(window, kInsertHotkeyId, MOD_NOREPEAT, VK_INSERT)) {
+        cm::log::print("[App] Could not register the Insert show/hide hotkey (%lu).", GetLastError());
+    }
+
     bool done = false;
     while (!done) {
         MSG message;
@@ -191,6 +213,13 @@ int runApp(HINSTANCE instance) {
             if (message.message == WM_QUIT) done = true;
         }
         if (done) break;
+
+        // Panel hidden via Insert: keep pumping messages (the hotkey and
+        // the bot itself live there) but skip all rendering.
+        if (!g_panelVisible) {
+            Sleep(15);
+            continue;
+        }
 
         // Minimise CPU usage while the panel is fully occluded.
         if (g_occluded && g_swapChain->Present(0, DXGI_PRESENT_TEST) == DXGI_STATUS_OCCLUDED) {
@@ -216,6 +245,8 @@ int runApp(HINSTANCE instance) {
 
         if (app.quitRequested()) DestroyWindow(window);
     }
+
+    UnregisterHotKey(window, kInsertHotkeyId);
 
     app.shutdown();
 
