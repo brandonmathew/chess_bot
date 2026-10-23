@@ -19,6 +19,10 @@ class App {
     bool init();
     void shutdown();
 
+    // The host OS window (the floating panel). Used by the panel's drag
+    // strip to move the window around the desktop.
+    void setHostWindow(void* hwnd) { hostWindow_ = hwnd; }
+
     std::string configSummary() const;
 
     // Overlay-only mode: the settings window stays hidden unless the board
@@ -31,6 +35,7 @@ class App {
    private:
     // Section renderers
     void drawMenuBar();
+    void drawPanelHeader();
     void drawHeader();
     void drawCalibration();
     void drawLiveStatus();
@@ -59,6 +64,8 @@ class App {
     bool quitRequested() const { return quitRequested_; }
 
    private:
+    void* hostWindow_ = nullptr;
+
     AppConfig cfg_;
     ScreenCapture capture_;
     BoardDetector detector_;

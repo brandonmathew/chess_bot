@@ -1,5 +1,6 @@
 #include "app/App.h"
 
+#include <windows.h>
 #include <imgui.h>
 
 #include <algorithm>
@@ -436,8 +437,19 @@ void App::drawModals() {
 void App::frame() {
     drawMenuBar();
 
-    ImGui::SetNextWindowSize(ImVec2(660, 830), ImGuiCond_FirstUseEver);
-    ImGui::Begin("GambitChess Bot");
+    // The panel IS the OS window (a borderless topmost popup clipped to a
+    // rounded rectangle): pin the ImGui window to the whole work area so
+    // the menu floats directly on the desktop - no window frame anywhere.
+    ImGuiViewport* viewport = ImGui::GetMainViewport();
+    ImGui::SetNextWindowPos(viewport->WorkPos, ImGuiCond_Always);
+    ImGui::SetNextWindowSize(viewport->WorkSize, ImGuiCond_Always);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    ImGui::Begin("GambitChess Bot", nullptr,
+                 ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                     ImGuiWindowFlags_NoCollapse);
+
+    drawPanelHeader();
 
     drawHeader();
 
@@ -453,8 +465,31 @@ void App::frame() {
     drawActions();
 
     ImGui::End();
+    ImGui::PopStyleVar(2);
 
     drawModals();
+}
+
+void App::drawPanelHeader() {
+    const float width = ImGui::GetContentRegionAvail().x;
+    const ImVec2 stripStart = ImGui::GetCursorPos();
+
+    // Drag strip: pressing and dragging moves the whole floating panel
+    // (forwarded to the OS as a title-bar drag). The X at the right quits.
+    ImGui::InvisibleButton("##panel_drag", ImVec2(std::max(1.0f, width - 36.0f), 24.0f));
+    if (ImGui::IsItemActivated() && hostWindow_) {
+        ReleaseCapture();
+        SendMessageA(static_cast<HWND>(hostWindow_), WM_NCLBUTTONDOWN, HTCAPTION, 0);
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("X")) quitRequested_ = true;
+
+    const ImVec2 winPos = ImGui::GetWindowPos();
+    ImGui::GetWindowDrawList()->AddText(
+        ImVec2(winPos.x + stripStart.x + 2.0f, winPos.y + stripStart.y + 4.0f),
+        ImGui::GetColorU32(kAccent), "GambitChess Bot - drag to move");
+
+    ImGui::Separator();
 }
 
 // ── Callbacks ────────────────────────────────────────────────────────────────
